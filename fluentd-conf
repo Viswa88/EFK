@@ -14,18 +14,13 @@ data:
     </system>
 
   containers.input.conf: |-
-    # This configuration file for Fluentd / td-agent is used
-    # Json Log Example:
-    # {"log":"[info:2016-02-16T16:04:05.930-08:00] Some log text here\n","stream":"stdout","time":"2016-02-17T00:04:05.931087621Z"}
-    # CRI Log Example:
-    # 2016-02-17T00:04:05.931087621Z stdout F [info:2016-02-16T16:04:05.930-08:00] Some log text here
     <source>
       @id fluentd-containers.log
       @type tail
-      path /var/log/containers/*
+      path /var/log/containers/*.log
       pos_file /var/log/es-containers.log.pos
       time_format %Y-%m-%dT%H:%M:%S.%NZ
-      tag raw.kubernetes.*
+      tag kubernetes.*
       read_from_head true
       <parse>
         @type multi_format
@@ -40,7 +35,6 @@ data:
         </pattern>
       </parse>
     </source>
-
     # Detect exceptions in the log output and forward them as one log entry.
     <match raw.kubernetes.**>
       @id raw.kubernetes
@@ -52,21 +46,6 @@ data:
       max_bytes 500000
       max_lines 1000
     </match>
-
-  system.input.conf: |-
-    # Example:
-    # 2015-12-21 23:17:22,066 [salt.state       ][INFO    ] Completed state [net.ipv4.ip_forward] at time 23:17:22.066081
-    # time="2016-02-04T07:53:57.505612354Z" level=error msg="HTTP Error" err="No such image: -f" statusCode=404
-    # TODO(random-liu): Remove this after cri container runtime rolls out.
-    <source>
-      @id docker.log
-      @type tail
-      format /^time="(?<time>[^)]*)" level=(?<severity>[^ ]*) msg="(?<message>[^"]*)"( err="(?<error>[^"]*)")?( statusCode=($<status_code>\d+))?/
-      path /var/log/docker.log
-      pos_file /var/log/es-docker.log.pos
-      tag docker
-    </source>
-
   forward.input.conf: |-
     # Takes the messages sent over TCP
     <source>
@@ -75,28 +54,8 @@ data:
 
   output.conf: |-
     # Enriches records with Kubernetes metadata
-    <filter *.*.log>
+    <filter kubernetes.var.log.containers.*.*.log>
       @type kubernetes_metadata
-      annotation_match [ ".+"]  # Get annotations
-    </filter>
-    <match kubernetes.**>
-      @type rewrite_tag_filter
-      capitalize_regex_backreference yes
-      @log_level info
-      <rule>
-        key stag
-        pattern ^(.+)$
-        tag modified.$1
-        </rule>
-    </match>
-    <filter modified.**>
-      @type record_modifier
-      remove_keys stag
-    </filter>
-    <filter kube.**>
-     @type record_transformer
-     enable_ruby true
-     remove_keys kubernetes_namespace_container_name,CONTAINER_ID,CONTAINER_ID_FULL,CONTAINER_NAME,CONTAINER_TAG,$["system.argv"],$["system.exe"],$["system.process-name"],$["kubernetes"]["container_image_id"],$["kubernetes"]["master_url"],$["kubernetes"]["namespace_id"],$["kubernetes"]["pod_id"]
     </filter>
     <filter **>
       @type grep
@@ -119,7 +78,6 @@ data:
         pattern DEBUG \[*
       </exclude>
     </filter>
-
     <match **>
       @type copy
       <store>
@@ -145,21 +103,21 @@ data:
         </buffer>
       </store>
       <store>
-        @type s3
-        @id out_s3
-        @log_level info
-        include_tag_key true
-        s3_bucket devops-vpc-images-devops-**
-        s3_region eu-west-2
-        path logs/${tag[4]}/
-        s3_object_key_format %{path}${tag[4]}-%{index}.%{file_extension}
-        time_slice_format %Y%m%d-%H
-        time_slice_wait 5m
-        output_include_time false
-        output_include_tag false
-        output_data_type attr:message
-        <buffer tag,kubernetes,pod_name>
-          timekey 3600
-        </buffer>
+       @type s3
+       @id out_s3
+       @log_level info
+       s3_bucket devops-vpc-images-devops-***
+       s3_region eu-west-2
+       path logs/${tag[4]}/
+       s3_object_key_format %{path}${tag[4]}-%{index}.%{file_extension}
+       time_slice_format %Y%m%d-%H
+       time_slice_wait 1m
+       <buffer tag,kubernetes,pod_name>
+         @type file
+         path /var/log/containers
+         timekey 3600
+         chunk_limit_size 2M
+         overflow_action block
+       </buffer>
       </store>
     </match>

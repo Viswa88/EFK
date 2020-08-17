@@ -105,19 +105,16 @@ data:
       <store>
        @type s3
        @id out_s3
-       @log_level info
-       s3_bucket devops-vpc-images-devops-***
+       @log_level DEBUG
+       s3_bucket devops-vpc-images-devops-nagra
        s3_region eu-west-2
        path logs/${tag[4]}/
-       s3_object_key_format %{path}${tag[4]}-%{index}.%{file_extension}
-       time_slice_format %Y%m%d-%H
-       time_slice_wait 1m
+       s3_object_key_format %{path}-%{index}.%{file_extension}
+    
+       time_slice_wait 60m
        <buffer tag,kubernetes,pod_name>
-         @type file
-         path /var/log/containers
          timekey 3600
-         chunk_limit_size 2M
-         overflow_action block
        </buffer>
       </store>
     </match>
+

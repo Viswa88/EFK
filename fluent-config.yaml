@@ -54,7 +54,7 @@ data:
 
   output.conf: |-
     # Enriches records with Kubernetes metadata
-    <filter kubernetes.**>
+    <filter kubernetes.var.log.containers.*.*.log>
       @type kubernetes_metadata
     </filter>
     <filter **>
@@ -103,18 +103,24 @@ data:
         </buffer>
       </store>
       <store>
-        @type s3
-        @id out_s3
-        @log_level DEBUG
-        s3_bucket devops-vpc-images-***
-        s3_region eu-west-2
-        path logs/${tag[4]}/
-        s3_object_key_format %{path}${tag[4]}-%{index}.%{file_extension}
-        time_slice_format %Y%m%d-%H
-        time_slice_wait 5m
-        <buffer tag,kubernetes,pod_name>
-          timekey 3600
-        </buffer>
+       @type s3
+       @id out_s3
+       @log_level DEBUG
+       s3_bucket devops-vpc-images-devops-***
+       s3_region eu-west-2
+       path logs/${tag[4]}/
+       s3_object_key_format %{path}%{time_slice}%{index}.%{file_extension}
+       buffer_path /var/log/fluent/s3
+
+       time_slice_format %Y%m%d-%H
+       time_slice_wait 10m
+       utc
+
+       format json
+       <buffer tag,kubernetes,pod_name>
+         flush_interval 600s
+       </buffer>
       </store>
+
     </match>
 

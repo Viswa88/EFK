@@ -29,17 +29,19 @@ data:
           time_key time
           time_format %Y-%m-%dT%H:%M:%S.%NZ
         </pattern>
-        <pattern>
-          format /^(?<time>.+) (?<stream>stdout|stderr) [^ ]* (?<log>.*)$/
-          time_format %Y-%m-%dT%H:%M:%S.%N%:z
-        </pattern>
       </parse>
     </source>
     # Detect exceptions in the log output and forward them as one log entry.
     <match raw.kubernetes.**>
       @id raw.kubernetes
       @type detect_exceptions
-      remove_tag_prefix raw
+      #@type rewrite_tag_filter
+      #remove_tag_prefix raw
+      #<rule>
+      #  key level
+      #  pattern /debug/
+      #  tag logs.debug
+      #</rule>
       message log
       stream stream
       multiline_flush_interval 5
@@ -53,75 +55,75 @@ data:
     </source>
 
   output.conf: |-
-    # Enriches records with Kubernetes metadata
-    <filter kubernetes.var.log.containers.*.*.log>
-      @type kubernetes_metadata
-    </filter>
-    <filter **>
-      @type grep
-      <exclude>
-        key log
-        pattern "/ping"
-      </exclude>
-    </filter>
-    <filter **>
-      @type grep
-      <exclude>
-        key log
-        pattern "Metric client health check"
-      </exclude>
-    </filter>
-    <filter **>
-      @type grep
-      <exclude>
-        key log
-        pattern DEBUG \[*
-      </exclude>
-    </filter>
-    <match **>
+
+    <match kubernetes.**>
       @type copy
       <store>
-        @id elasticsearch
-        @type elasticsearch
-        @log_level info
-        include_tag_key true
-        host elasticsearch-logging
-        port 9200
-        logstash_format true
-        <buffer>
-          @type file
-          path /var/log/fluentd-buffers/kubernetes.system.buffer
-          flush_mode interval
-          retry_type exponential_backoff
-          flush_thread_count 2
-          flush_interval 5s
-          retry_forever
-          retry_max_interval 30
-          chunk_limit_size 2M
-          queue_limit_length 8
-          overflow_action block
-        </buffer>
+        @type relabel
+        @label @s3
       </store>
       <store>
-       @type s3
-       @id out_s3
-       s3_bucket devops-vpc-images-devops-nagra
-       s3_region eu-west-2
-       time_slice_format %Y-%m-%d
-       path ${tag[3]}/Year=%Y/Month=%m/Date=%d/
-       #time_slice_format %Y%m%d%H%M
-       s3_object_key_format %{path}%{index}.%{file_extension}
-
-       <buffer tag,time,kubernetes,pod_name,service_name>
-         @type file
-         path /var/log/fluent/s3
-         timekey 120 # 1 hour partition
-         timekey_wait 1m
-         timekey_use_utc true # use utc
-       </buffer>
-       format json
+        @type relabel
+        @label @es
       </store>
-
     </match>
+
+
+    <label @s3>
+      <match kubernetes.**>
+        @type s3
+        @id out_s3
+        @log_level DEBUG
+        s3_bucket devops-vpc-images-devops-nagra
+        s3_region eu-west-2
+        path year=%Y/month=%m/day=%d/${tag[4]}/
+        time_slice_format %Y%m%d%H%M
+        s3_object_key_format %{path}%{index}.%{file_extension}
+
+        <buffer tag,time,kubernetes,pod_name>
+          @type file
+          path /var/log/fluent/s3
+          timekey 300
+          timekey_wait 1m
+          timekey_use_utc true
+        </buffer>
+        format json
+      </match>
+    </label>
+
+    <label @es>
+      <filter **>
+        @type grep
+        <exclude>
+          key log
+          pattern DEBUG \[*
+        </exclude>
+      </filter>
+      <match **>
+        @type copy
+        <store>
+          @id elasticsearch
+          @type elasticsearch
+          @log_level info
+          include_tag_key true
+          host elasticsearch-logging
+          port 9200
+          logstash_format true
+          <buffer>
+            @type file
+            path /var/log/fluentd-buffers/kubernetes.system.buffer
+            flush_mode interval
+            retry_type exponential_backoff
+            flush_thread_count 2
+            flush_interval 5s
+            retry_forever
+            retry_max_interval 30
+            chunk_limit_size 2M
+            queue_limit_length 8
+            overflow_action block
+          </buffer>
+        </store>
+      </match>
+    </label>
 
 
